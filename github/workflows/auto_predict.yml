@@ -1,0 +1,25 @@
+name: Ejecutar IA Futbol Diario
+
+on:
+  schedule:
+    # Se ejecuta todos los días a las 08:00 AM UTC
+    - cron: '0 8 * * *'
+  workflow_dispatch: # Permite ejecutarlo manualmente desde GitHub
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v2
+
+      - name: Configurar Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Instalar librerías
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar IA
+        run: python IA_Predictor.py
