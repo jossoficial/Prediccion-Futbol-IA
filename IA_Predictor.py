@@ -3,52 +3,74 @@ import json
 import pandas as pd
 from datetime import datetime
 
-# CONFIGURACIÓN
+# --- CONFIGURACIÓN DE TUS LLAVES ---
 TOKEN_FUTBOL = '387c7707cc4b4dc1b2fc0f94ae2da4f1'
-FIREBASE_URL = 'https://prediccionesfutbol-1199a-default-rtdb.firebaseio.com/jornada_hoy.json'
+FIREBASE_URL = 'https://prediccionesfutbol-1199a-default-rtdb.firebaseio.com/'
 headers = { 'X-Auth-Token': TOKEN_FUTBOL }
 
-def automatizar_jornada():
-    # 1. Obtener la tabla para tener las estadísticas de poder
+def ejecutar_ia_profesional():
+    print("🚀 Iniciando Escaneo de Jornada...")
+    
+    # 1. OBTENER ESTADÍSTICAS Y RACHAS
     url_tabla = 'https://api.football-data.org/v4/competitions/PD/standings'
     res_tabla = requests.get(url_tabla, headers=headers).json()
     
-    equipos_stats = {}
+    stats_equipos = {}
     for team in res_tabla['standings'][0]['table']:
-        # Calculamos el Power Score (Puntos + Goles / Partidos Jugados)
-        power = (team['points'] / team['playedGames']) + (team['goalsFor'] / team['playedGames'])
-        equipos_stats[team['team']['name']] = round(power, 2)
+        nombre = team['team']['name']
+        puntos = team['points']
+        pj = team['playedGames']
+        goles = team['goalsFor']
+        racha = team['form'] if team['form'] else "DDDDD"
+        
+        # Cálculo de Momentum (W=3, D=1, L=0)
+        valor_racha = racha.count('W') * 3 + racha.count('D') * 1
+        
+        # FÓRMULA IA: (60% Historia/Puntos + 40% Racha Actual)
+        power_score = ((puntos/pj) + (goles/pj)) * 0.6 + (valor_racha/5) * 0.4
+        stats_equipos[nombre] = round(power_score, 2)
 
-    # 2. Buscar los partidos programados para HOY
+    # 2. BUSCAR PARTIDOS DE HOY AUTOMÁTICAMENTE
     url_partidos = 'https://api.football-data.org/v4/competitions/PD/matches'
     res_partidos = requests.get(url_partidos, headers=headers).json()
     
-    predicciones_hoy = []
+    predicciones_finales = []
     
-    for match in res_partidos['matches']:
-        # Filtramos solo partidos que no han empezado (SCHEDULED o TIMED)
-        if match['status'] in ['SCHEDULED', 'TIMED']:
-            local = match['homeTeam']['name']
-            visitante = match['awayTeam']['name']
+    for m in res_partidos['matches']:
+        # Solo partidos programados para hoy o próximos
+        if m['status'] in ['SCHEDULED', 'TIMED']:
+            loc = m['homeTeam']['name']
+            vis = m['awayTeam']['name']
             
-            # Obtenemos sus poderes de nuestra tabla
-            p_local = equipos_stats.get(local, 0)
-            p_visitante = equipos_stats.get(visitante, 0)
+            pwr_l = stats_equipos.get(loc, 0)
+            pwr_v = stats_equipos.get(vis, 0)
             
-            ganador = local if p_local > p_visitante else visitante
+            ganador = loc if pwr_l > pwr_v else vis
+            confianza = round(abs(pwr_l - pwr_v) * 10, 1)
             
-            predicciones_hoy.append({
-                'partido': f"{local} vs {visitante}",
-                'prediccion': ganador,
-                'hora': match['utcDate']
+            predicciones_finales.append({
+                "partido": f"{loc} vs {vis}",
+                "prediccion": ganador,
+                "confianza": f"{confianza}%",
+                "hora": m['utcDate']
             })
 
-    # 3. Enviar toda la lista a Firebase
-    if predicciones_hoy:
-        requests.put(FIREBASE_URL, data=json.dumps(predicciones_hoy))
-        print(f"✅ Se han enviado {len(predicciones_hoy)} predicciones a tu App.")
+    # 3. ACTUALIZAR FIREBASE Y ENVIAR NOTIFICACIÓN
+    if predicciones_finales:
+        # Subir lista de partidos
+        requests.put(f"{FIREBASE_URL}jornada.json", data=json.dumps(predicciones_finales))
+        
+        # Enviar señal de Alerta/Notificación
+        alerta = {
+            "titulo": "⚽ ¡IA Actualizada!",
+            "mensaje": f"Se han analizado {len(predicciones_finales)} partidos con éxito.",
+            "hora": datetime.now().strftime("%H:%M")
+        }
+        requests.put(f"{FIREBASE_URL}alerta.json", data=json.dumps(alerta))
+        
+        print(f"✅ ÉXITO: {len(predicciones_finales)} predicciones enviadas a la App.")
     else:
-        print("⚽ No hay partidos programados para hoy.")
+        print("😴 No hay partidos programados para las próximas horas.")
 
-# Ejecutar el piloto automático
-automatizar_jornada()
+# --- EJECUTAR TODO ---
+ejecutar_ia_profesional()
