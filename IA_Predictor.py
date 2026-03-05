@@ -2,44 +2,56 @@ import requests
 import json
 import pandas as pd
 
-# Configuración de APIs
+# CONFIGURACIÓN
 TOKEN_FUTBOL = '387c7707cc4b4dc1b2fc0f94ae2da4f1'
 FIREBASE_URL = 'https://prediccionesfutbol-1199a-default-rtdb.firebaseio.com/predicciones.json'
+headers = { 'X-Auth-Token': TOKEN_FUTBOL }
 
-def ejecutar_prediccion(local, visitante):
-    headers = { 'X-Auth-Token': TOKEN_FUTBOL }
-    url = 'https://api.football-data.org/v4/competitions/PD/standings'
-    res = requests.get(url, headers=headers).json()
+def calcular_con_racha(local, visitante):
+    # 1. Obtener la tabla y los últimos resultados
+    url_tabla = 'https://api.football-data.org/v4/competitions/PD/standings'
+    data = requests.get(url_tabla, headers=headers).json()
     
-    # Procesar tabla de posiciones
     equipos = []
-    for team in res['standings'][0]['table']:
+    for team in data['standings'][0]['table']:
+        # Extraemos la racha (ejemplo: W,D,L,W,W)
+        racha = team['form'] if team['form'] else "DDDDD" 
+        
+        # Convertimos la racha en un valor numérico (W=3 pts, D=1 pt, L=0 pts)
+        puntos_racha = racha.count('W') * 3 + racha.count('D') * 1
+        
         equipos.append({
             'nombre': team['team']['name'],
             'puntos': team['points'],
             'goles': team['goalsFor'],
-            'pj': team['playedGames']
+            'pj': team['playedGames'],
+            'racha_valor': puntos_racha # El "Momentum"
         })
+    
     df = pd.DataFrame(equipos)
     
-    # Lógica de cálculo (IA simple)
-    stats_l = df[df['nombre'] == local].iloc[0]
-    stats_v = df[df['nombre'] == visitante].iloc[0]
+    # 2. Lógica Avanzada (60% Historia + 40% Racha Actual)
+    def obtener_power(nombre_equipo):
+        e = df[df['nombre'] == nombre_equipo].iloc[0]
+        base = (e['puntos'] / e['pj']) + (e['goles'] / e['pj'])
+        momentum = (e['racha_valor'] / 5) # Promedio de los últimos 5
+        return (base * 0.6) + (momentum * 0.4)
+
+    power_l = obtener_power(local)
+    power_v = obtener_power(visitante)
     
-    pow_l = (stats_l['puntos'] / stats_l['pj']) + (stats_l['goles'] / stats_l['pj'])
-    pow_v = (stats_v['puntos'] / stats_v['pj']) + (stats_v['goles'] / stats_v['pj'])
+    ganador = local if power_l > power_v else visitante
     
-    ganador = local if pow_l > pow_v else visitante
-    
-    # Enviar datos a Firebase para la App
+    # 3. Enviar a Firebase con el nuevo nivel de confianza
     datos = {
         "partido": f"{local} vs {visitante}",
         "ganador": ganador,
-        "score_l": round(pow_l, 2),
-        "score_v": round(pow_v, 2)
+        "confianza": round(abs(power_l - power_v) * 10, 2), # Diferencia de nivel
+        "analisis": "Basado en racha de últimos 5 partidos"
     }
+    
     requests.put(FIREBASE_URL, data=json.dumps(datos))
-    print(f"✅ Predicción enviada a Firebase: {ganador}")
+    print(f"🔥 IA Mejorada: {ganador} tiene mejor racha actual.")
 
-# Ejemplo de ejecución
-ejecutar_prediccion('Real Madrid CF', 'FC Barcelona')
+# Prueba con el próximo partido
+calcular_con_racha('Real Madrid CF', 'FC Barcelona')
