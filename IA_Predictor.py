@@ -3,15 +3,15 @@ import json
 import pandas as pd
 from datetime import datetime
 
-# --- CONFIGURACIÓN DE TUS LLAVES ---
+# --- TUS CREDENCIALES ---
 TOKEN_FUTBOL = '387c7707cc4b4dc1b2fc0f94ae2da4f1'
 FIREBASE_URL = 'https://prediccionesfutbol-1199a-default-rtdb.firebaseio.com/'
 headers = { 'X-Auth-Token': TOKEN_FUTBOL }
 
-def ejecutar_ia_profesional():
-    print("🚀 Iniciando Escaneo de Jornada...")
+def ejecutar_ia_maestra():
+    print("⚽ Iniciando Analista de IA...")
     
-    # 1. OBTENER ESTADÍSTICAS Y RACHAS
+    # 1. OBTENER TABLA Y MOMENTUM (RACHA)
     url_tabla = 'https://api.football-data.org/v4/competitions/PD/standings'
     res_tabla = requests.get(url_tabla, headers=headers).json()
     
@@ -21,56 +21,65 @@ def ejecutar_ia_profesional():
         puntos = team['points']
         pj = team['playedGames']
         goles = team['goalsFor']
-        racha = team['form'] if team['form'] else "DDDDD"
+        racha = team['form'] if team['form'] else "DDDDD" # W=Gana, D=Empata, L=Pierde
         
-        # Cálculo de Momentum (W=3, D=1, L=0)
-        valor_racha = racha.count('W') * 3 + racha.count('D') * 1
+        # Valor de Racha (W=3, D=1, L=0)
+        puntos_racha = racha.count('W') * 3 + racha.count('D') * 1
         
-        # FÓRMULA IA: (60% Historia/Puntos + 40% Racha Actual)
-        power_score = ((puntos/pj) + (goles/pj)) * 0.6 + (valor_racha/5) * 0.4
-        stats_equipos[nombre] = round(power_score, 2)
+        # FÓRMULA: 60% Tabla Histórica + 40% Racha Reciente
+        power = ((puntos/pj) + (goles/pj)) * 0.6 + (puntos_racha/5) * 0.4
+        stats_equipos[nombre] = {
+            "pwr": round(power, 2),
+            "escudo": team['team']['crest'] # URL del escudo oficial
+        }
 
     # 2. BUSCAR PARTIDOS DE HOY AUTOMÁTICAMENTE
     url_partidos = 'https://api.football-data.org/v4/competitions/PD/matches'
     res_partidos = requests.get(url_partidos, headers=headers).json()
     
-    predicciones_finales = []
+    predicciones_del_dia = []
     
     for m in res_partidos['matches']:
-        # Solo partidos programados para hoy o próximos
+        # Solo partidos por jugar (SCHEDULED)
         if m['status'] in ['SCHEDULED', 'TIMED']:
-            loc = m['homeTeam']['name']
-            vis = m['awayTeam']['name']
+            loc_name = m['homeTeam']['name']
+            vis_name = m['awayTeam']['name']
             
-            pwr_l = stats_equipos.get(loc, 0)
-            pwr_v = stats_equipos.get(vis, 0)
+            # Obtener datos de nuestra IA
+            pwr_l = stats_equipos.get(loc_name, {"pwr": 0})["pwr"]
+            pwr_v = stats_equipos.get(vis_name, {"pwr": 0})["pwr"]
+            escudo_l = stats_equipos.get(loc_name, {"escudo": ""})["escudo"]
+            escudo_v = stats_equipos.get(vis_name, {"escudo": ""})["escudo"]
             
-            ganador = loc if pwr_l > pwr_v else vis
-            confianza = round(abs(pwr_l - pwr_v) * 10, 1)
+            # Decisión de la IA
+            ganador = loc_name if pwr_l > pwr_v else vis_name
+            dif = abs(pwr_l - pwr_v)
+            confianza = "ALTA" if dif > 0.5 else "MEDIA"
             
-            predicciones_finales.append({
-                "partido": f"{loc} vs {vis}",
-                "prediccion": ganador,
-                "confianza": f"{confianza}%",
+            predicciones_del_dia.append({
+                "partido": f"{loc_name} vs {vis_name}",
+                "ganador": ganador,
+                "confianza": confianza,
+                "escudo_local": escudo_l,
+                "escudo_visitante": escudo_v,
                 "hora": m['utcDate']
             })
 
-    # 3. ACTUALIZAR FIREBASE Y ENVIAR NOTIFICACIÓN
-    if predicciones_finales:
-        # Subir lista de partidos
-        requests.put(f"{FIREBASE_URL}jornada.json", data=json.dumps(predicciones_finales))
+    # 3. ENVIAR A FIREBASE Y DISPARAR NOTIFICACIÓN
+    if predicciones_del_dia:
+        # Subir lista completa
+        requests.put(f"{FIREBASE_URL}jornada.json", data=json.dumps(predicciones_del_dia))
         
-        # Enviar señal de Alerta/Notificación
+        # Enviar señal de notificación a la App
         alerta = {
-            "titulo": "⚽ ¡IA Actualizada!",
-            "mensaje": f"Se han analizado {len(predicciones_finales)} partidos con éxito.",
-            "hora": datetime.now().strftime("%H:%M")
+            "titulo": "🔥 IA: ¡Predicciones Listas!",
+            "mensaje": f"Analizados {len(predicciones_del_dia)} partidos de hoy con éxito.",
+            "fecha": datetime.now().strftime("%d/%m/%Y %H:%M")
         }
         requests.put(f"{FIREBASE_URL}alerta.json", data=json.dumps(alerta))
-        
-        print(f"✅ ÉXITO: {len(predicciones_finales)} predicciones enviadas a la App.")
+        print(f"✅ ¡Éxito! {len(predicciones_del_dia)} partidos enviados a Firebase.")
     else:
-        print("😴 No hay partidos programados para las próximas horas.")
+        print("😴 Hoy no hay partidos programados en La Liga.")
 
-# --- EJECUTAR TODO ---
-ejecutar_ia_profesional()
+# Ejecutar programa
+ejecutar_ia_maestra()
